@@ -99,16 +99,6 @@ void CreateAttachableCube()
 
 ---
 
-## 📝 Additional Notes
-
-### 🔣 Scripting Symbols
-- DEBUG_ENABLED : Example debug
-
-### 🎮 Cheat Codes
-- CHEAT_EXAMPLE_SYMBOL : Example description
-
----
-
 ## ⭐ Credits & Acknowledgments
 
 ### 🎖️ Original Project Team
@@ -116,27 +106,15 @@ void CreateAttachableCube()
 - [kpansavuth201](https://github.com/kpansavuth201) - Initial project commit
 
 ### 🔧 Fork Contributors
-- [Your Name/Username] - Implementation of the attachment system
+- [Cartterr](https://github.com/Cartterr) - Implementation of the attachment system
+- Sebastian Avendaño
+- Nicolás Riquelme
+- from.ignacio.import.doom
 
 ### 📚 Resources & Inspiration
 - [Unity XR Interaction Toolkit Documentation](https://docs.unity3d.com/Packages/com.unity.xr.interaction.toolkit@2.0/manual/index.html)
 - [Meta Quest Developer Hub](https://developer.oculus.com/quest/)
 
----
-
-## 📄 License
-
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
-
-The original work is copyright © 2023 Core Polygon, licensed under GPL-3.0.
-
----
-
-## 📞 Contact
-
-For questions about this fork, please [open an issue](https://github.com/yourusername/unity-mr-template-quest3/issues) on GitHub.
-
-For inquiries about the original template, contact [Core Polygon](https://github.com/corepolygon).
 
 ---
 
