@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
-using VRProject; // Add the namespace reference
 
 public class AttachableCube : XRGrabInteractable
 {
@@ -10,9 +9,8 @@ public class AttachableCube : XRGrabInteractable
     public float maxDistance = 5.0f;
 
     // Attachment settings
-    public bool autoSearchForAttachmentPoints = true;
-    public List<AttachmentPoint> attachmentPoints = new List<AttachmentPoint>();
-    public float proximityHighlightDistance = 0.15f;
+    public float attachmentRadius = 0.1f;
+    public string attachmentTag = "AttachableCube";
 
     // Optional visual feedback
     public Material defaultMaterial;
@@ -29,8 +27,11 @@ public class AttachableCube : XRGrabInteractable
     private Quaternion initialGrabRotationOffsetVsRay;
     private Vector2 lastAnalogInput;
 
-    // Connection state tracking
-    private bool isConnectedToAnything = false;    protected override void Awake()
+    // Connection tracking
+    private List<AttachableCube> connectedCubes = new List<AttachableCube>();
+    private Dictionary<AttachableCube, FixedJoint> joints = new Dictionary<AttachableCube, FixedJoint>();
+
+    protected override void Awake()
     {
         base.Awake();
 
@@ -38,38 +39,21 @@ public class AttachableCube : XRGrabInteractable
         rb = GetComponent<Rigidbody>();
         if (rb == null)
         {
-            Debug.LogError("AttachableCube requires a Rigidbody component.", this);
+            rb = gameObject.AddComponent<Rigidbody>();
+            Debug.Log("Added Rigidbody to AttachableCube.");
         }
 
         meshRenderer = GetComponent<MeshRenderer>();
-
-        // Auto-find attachment points if enabled
-        if (autoSearchForAttachmentPoints && attachmentPoints.Count == 0)
+        if (meshRenderer == null)
         {
-            AttachmentPoint[] points = GetComponentsInChildren<AttachmentPoint>();
-            attachmentPoints.AddRange(points);
-
-            if (attachmentPoints.Count == 0)
-            {
-                Debug.LogWarning("No attachment points found on " + gameObject.name + ". You may need to add AttachmentPoint components to child GameObjects.", this);
-            }
+            Debug.LogWarning("AttachableCube doesn't have a MeshRenderer component.", this);
         }
 
-        // Initialize all attachment points
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null)
-            {
-                point.parentCube = this;
-            }
-        }
+        // Make sure this object has the correct tag for easier identification
+        gameObject.tag = attachmentTag;
+    }
 
-        // Make sure this object has the "AttachableCube" tag for easier identification
-        if (!CompareTag("AttachableCube"))
-        {
-            gameObject.tag = "AttachableCube";
-        }
-    }    protected override void OnSelectEntered(SelectEnterEventArgs args)
+    protected override void OnSelectEntered(SelectEnterEventArgs args)
     {
         base.OnSelectEntered(args);
 
@@ -77,7 +61,7 @@ public class AttachableCube : XRGrabInteractable
         if (args.interactorObject is XRRayInteractor rayInteractor)
         {
             selectingRayInteractorRef = rayInteractor;
-            rayOriginForDistanceAdjust = rayInteractor.rayOriginTransform; // Typically the controller's transform
+            rayOriginForDistanceAdjust = rayInteractor.rayOriginTransform;
 
             if (rayOriginForDistanceAdjust != null)
             {
@@ -93,23 +77,17 @@ public class AttachableCube : XRGrabInteractable
             }
         }
 
-        // When grabbed, temporarily disable all attachment points to prevent accidental connections during movement
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo == null)  // Only disable free attachment points
-            {
-                point.GetComponent<Collider>().enabled = false;
-            }
-        }
-
         // Change material to indicate grabbed state
         if (meshRenderer != null && highlightMaterial != null)
         {
             meshRenderer.material = highlightMaterial;
         }
-    }    protected override void OnSelectExited(SelectExitEventArgs args)
+    }
+
+    protected override void OnSelectExited(SelectExitEventArgs args)
     {
         base.OnSelectExited(args);
+
         if (args.interactorObject == selectingRayInteractorRef)
         {
             isSelectedByRayForDistanceAdjust = false;
@@ -117,20 +95,126 @@ public class AttachableCube : XRGrabInteractable
             rayOriginForDistanceAdjust = null;
         }
 
-        // Re-enable all attachment points that aren't already connected
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo == null)
-            {
-                point.GetComponent<Collider>().enabled = true;
-            }
-        }
-
-        // Reset material based on connection state
+        // Update material based on connection state
         UpdateVisualState();
 
-        // Check for nearby attachment points when released
-        CheckForPotentialConnections();
+        // Check for potential attachments when released
+        CheckForAttachment();
+    }
+
+    private void CheckForAttachment()
+    {
+        Collider[] nearbyColliders = Physics.OverlapSphere(transform.position, attachmentRadius);
+
+        foreach (Collider col in nearbyColliders)
+        {
+            // Skip self or already connected cubes
+            if (col.gameObject == gameObject) continue;
+
+            AttachableCube otherCube = col.GetComponent<AttachableCube>();
+            if (otherCube != null && !IsConnectedTo(otherCube))
+            {
+                // Connect to this cube
+                ConnectTo(otherCube);
+                break; // Only connect to one cube at a time for simplicity
+            }
+        }
+    }
+
+    private bool IsConnectedTo(AttachableCube otherCube)
+    {
+        return connectedCubes.Contains(otherCube);
+    }
+
+    private void ConnectTo(AttachableCube otherCube)
+    {
+        // Create a fixed joint to physically connect the two cubes
+        FixedJoint joint = gameObject.AddComponent<FixedJoint>();
+        joint.connectedBody = otherCube.rb;
+        joint.breakForce = Mathf.Infinity; // Make it unbreakable (you can adjust this)
+        joint.breakTorque = Mathf.Infinity;
+
+        // Register the connection
+        connectedCubes.Add(otherCube);
+        joints[otherCube] = joint;
+
+        // Also register the connection on the other cube
+        otherCube.RegisterConnection(this, joint);
+
+        // Update visual state
+        UpdateVisualState();
+        otherCube.UpdateVisualState();
+
+        Debug.Log($"Connected {gameObject.name} to {otherCube.gameObject.name}");
+    }
+
+    public void RegisterConnection(AttachableCube cube, FixedJoint joint)
+    {
+        if (!connectedCubes.Contains(cube))
+        {
+            connectedCubes.Add(cube);
+            // Note: we don't duplicate the joint reference here, as the joint exists on the other object
+        }
+    }
+
+    // Method to disconnect from a specific cube
+    public void DisconnectFrom(AttachableCube otherCube)
+    {
+        if (connectedCubes.Contains(otherCube))
+        {
+            // Destroy the joint if we have it
+            if (joints.TryGetValue(otherCube, out FixedJoint joint) && joint != null)
+            {
+                Destroy(joint);
+                joints.Remove(otherCube);
+            }
+
+            connectedCubes.Remove(otherCube);
+
+            // Also tell the other cube to disconnect from us
+            otherCube.UnregisterConnection(this);
+
+            // Update visual state
+            UpdateVisualState();
+            otherCube.UpdateVisualState();
+
+            Debug.Log($"Disconnected {gameObject.name} from {otherCube.gameObject.name}");
+        }
+    }
+
+    public void UnregisterConnection(AttachableCube cube)
+    {
+        if (connectedCubes.Contains(cube))
+        {
+            connectedCubes.Remove(cube);
+            // We don't need to worry about the joint here as it exists on the other object
+        }
+    }
+
+    // Method to disconnect all connections
+    public void DisconnectAll()
+    {
+        // Create a copy of the list to iterate through since we'll be modifying it
+        List<AttachableCube> cubesToDisconnect = new List<AttachableCube>(connectedCubes);
+
+        foreach (AttachableCube cube in cubesToDisconnect)
+        {
+            DisconnectFrom(cube);
+        }
+
+        // Make sure everything is cleared
+        connectedCubes.Clear();
+        foreach (var joint in joints.Values)
+        {
+            if (joint != null)
+            {
+                Destroy(joint);
+            }
+        }
+        joints.Clear();
+
+        // Update visual state
+        UpdateVisualState();
     }
 
     // Update the visual state based on connection status
@@ -138,19 +222,7 @@ public class AttachableCube : XRGrabInteractable
     {
         if (meshRenderer == null) return;
 
-        // Check if any attachment points are connected
-        isConnectedToAnything = false;
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo != null)
-            {
-                isConnectedToAnything = true;
-                break;
-            }
-        }
-
-        // Apply appropriate material
-        if (isConnectedToAnything && connectedMaterial != null)
+        if (connectedCubes.Count > 0 && connectedMaterial != null)
         {
             meshRenderer.material = connectedMaterial;
         }
@@ -160,78 +232,30 @@ public class AttachableCube : XRGrabInteractable
         }
     }
 
-    // Check for nearby attachment points when the cube is released
-    private void CheckForPotentialConnections()
-    {
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo == null)
-            {
-                // Use a sphere cast to find nearby attachment points
-                Collider[] colliders = Physics.OverlapSphere(point.transform.position, point.snapDistance);
-                foreach (Collider col in colliders)
-                {
-                    if (col.CompareTag("AttachmentPoint"))
-                    {
-                        AttachmentPoint otherPoint = col.GetComponent<AttachmentPoint>();
-                        if (otherPoint != null && otherPoint.parentCube != this && otherPoint.connectedTo == null)
-                        {
-                            // Found a potential connection, trigger it
-                            point.GetComponent<Collider>().enabled = true;  // Ensure collider is enabled
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }    // Method to disconnect all attachment points
-    public void DisconnectAll()
-    {
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo != null)
-            {
-                point.Disconnect();
-            }
-        }
-
-        UpdateVisualState();
-    }
-
-    // Update is called once per frame
-    protected override void OnDestroy()
-    {
-        base.OnDestroy();
-        DisconnectAll();
-    }
-
     public override void ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase updatePhase)
     {
-        // Let the base class do its processing first.
-        // This handles standard grab attachment, events, etc.
+        // Let the base class do its processing first
         base.ProcessInteractable(updatePhase);
 
-        if (isSelectedByRayForDistanceAdjust && selectingRayInteractorRef != null && selectingRayInteractorRef.isSelectActive && rayOriginForDistanceAdjust != null)
+        if (isSelectedByRayForDistanceAdjust && selectingRayInteractorRef != null &&
+            selectingRayInteractorRef.isSelectActive && rayOriginForDistanceAdjust != null)
         {
             // Process input in Dynamic phase
             if (updatePhase == XRInteractionUpdateOrder.UpdatePhase.Dynamic)
             {
                 lastAnalogInput = Vector2.zero; // Default to no input
 
-                // Use Unity's Input system instead of trying to query the XR device directly
-                // This is a much more reliable approach across Unity versions
+                // Use Unity's Input system
                 lastAnalogInput.y = Input.GetAxis("Vertical"); // Usually maps to controller thumbstick Y
 
                 // Alternative: Check if we're dealing with Oculus/Meta Quest controllers
                 if (lastAnalogInput.y == 0)
                 {
-                    // Try Oculus specific input if standard input didn't work
                     lastAnalogInput.y = Input.GetAxis("Oculus_CrossPlatform_PrimaryThumbstickVertical");
                 }
 
-                // Check for disconnect button input (e.g., B button)
-                // You could add a configurable button for disconnection
-                if (Input.GetButtonDown("Fire2") || Input.GetKeyDown(KeyCode.B))  // Customize this for your input setup
+                // Check for disconnect button input
+                if (Input.GetButtonDown("Fire2") || Input.GetKeyDown(KeyCode.B))
                 {
                     DisconnectAll();
                 }
@@ -262,7 +286,8 @@ public class AttachableCube : XRGrabInteractable
                     currentAdjustedDistance = Mathf.Clamp(currentAdjustedDistance, minDistance, maxDistance);
                 }
 
-                Vector3 targetPosition = rayOriginForDistanceAdjust.position + rayOriginForDistanceAdjust.forward * currentAdjustedDistance;
+                Vector3 targetPosition = rayOriginForDistanceAdjust.position +
+                                        rayOriginForDistanceAdjust.forward * currentAdjustedDistance;
                 Quaternion targetRotation = rayOriginForDistanceAdjust.rotation * initialGrabRotationOffsetVsRay;
 
                 if (rb != null && movementType == MovementType.Kinematic)
@@ -270,85 +295,30 @@ public class AttachableCube : XRGrabInteractable
                     rb.MovePosition(targetPosition);
                     rb.MoveRotation(targetRotation);
                 }
-                else // Handles Instantaneous movement type, or if somehow not kinematic
+                else // Handles Instantaneous movement type
                 {
                     transform.SetPositionAndRotation(targetPosition, targetRotation);
                 }
             }
         }
-
-        // In the late update phase, check for potential connections if not held
-        if (updatePhase == XRInteractionUpdateOrder.UpdatePhase.Late && !isSelected)
-        {
-            // Only highlight nearby attachment points if we're not already connected
-            if (!isConnectedToAnything)
-            {
-                CheckForNearbyAttachmentPoints();
-            }
-        }
     }
 
-    // Check for nearby attachment points for visual highlighting
-    private void CheckForNearbyAttachmentPoints()
+    private void OnDrawGizmosSelected()
     {
-        // Implementation of proximity highlighting logic
-        // This is a more basic version that doesn't change materials
-        // You can expand this with visual feedback if needed
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo == null)
-            {
-                Collider[] colliders = Physics.OverlapSphere(point.transform.position, proximityHighlightDistance);
-                foreach (Collider col in colliders)
-                {
-                    if (col.CompareTag("AttachmentPoint"))
-                    {
-                        AttachmentPoint otherPoint = col.GetComponent<AttachmentPoint>();
-                        if (otherPoint != null && otherPoint.parentCube != this && otherPoint.connectedTo == null)
-                        {
-                            // Found a potential connection, could add visual feedback here
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        // Visualize the attachment radius
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, attachmentRadius);
     }
 
-    // Check if this cube is connected to another specific cube
-    public bool IsConnectedToCube(AttachableCube otherCube)
+    protected override void OnDestroy()
     {
-        if (otherCube == null) return false;
-
-        // Check if any of our attachment points are connected to any of the other cube's attachment points
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo != null && point.connectedTo.parentCube == otherCube)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        base.OnDestroy();
+        DisconnectAll();
     }
 
     // Get all cubes directly connected to this cube
     public List<AttachableCube> GetConnectedCubes()
     {
-        List<AttachableCube> connectedCubes = new List<AttachableCube>();
-
-        foreach (AttachmentPoint point in attachmentPoints)
-        {
-            if (point != null && point.connectedTo != null && point.connectedTo.parentCube != null)
-            {
-                // Add the connected cube if not already in the list
-                if (!connectedCubes.Contains(point.connectedTo.parentCube))
-                {
-                    connectedCubes.Add(point.connectedTo.parentCube);
-                }
-            }
-        }
-
-        return connectedCubes;
+        return new List<AttachableCube>(connectedCubes);
     }
 }

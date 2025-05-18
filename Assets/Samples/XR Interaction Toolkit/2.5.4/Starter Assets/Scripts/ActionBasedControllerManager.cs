@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine.Events;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit.UI;
+using UnityEngine.SceneManagement; // Added for scene reloading
 
 namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
 {
@@ -69,13 +70,28 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
         [Tooltip("The reference to the action of scrolling UI with this controller.")]
         InputActionReference m_UIScroll;
 
+        [SerializeField]
+        [Tooltip("The reference to the action of restarting the game. Typically mapped to the B button or similar.")]
+        InputActionReference m_RestartGame;
+
+        [Space]
+        [Header("Restart Settings")]
+
+        [SerializeField]
+        [Tooltip("If true, the restart button will be enabled.")]
+        bool m_RestartEnabled = true;
+
+        [SerializeField]
+        [Tooltip("Optional delay in seconds before restarting the game.")]
+        float m_RestartDelay = 0.5f;
+
         [Space]
         [Header("Locomotion Settings")]
 
         [SerializeField]
         [Tooltip("If true, continuous movement will be enabled. If false, teleport will enabled.")]
         bool m_SmoothMotionEnabled;
-        
+
         [SerializeField]
         [Tooltip("If true, continuous turn will be enabled. If false, snap turn will be enabled. Note: If smooth motion is enabled and enable strafe is enabled on the continuous move provider, turn will be overriden in favor of strafe.")]
         bool m_SmoothTurnEnabled;
@@ -123,9 +139,20 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             }
         }
 
+        public bool restartEnabled
+        {
+            get => m_RestartEnabled;
+            set
+            {
+                m_RestartEnabled = value;
+                UpdateRestartAction();
+            }
+        }
+
         bool m_StartCalled;
         bool m_PostponedDeactivateTeleport;
         bool m_HoveringScrollableUI;
+        bool m_IsRestarting;
 
         const int k_InteractorNotInGroup = -1;
 
@@ -186,6 +213,13 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
                 snapTurnAction.started += OnStartLocomotion;
                 snapTurnAction.canceled += OnStopLocomotion;
             }
+
+            // Setup restart game action
+            var restartAction = GetInputAction(m_RestartGame);
+            if (restartAction != null)
+            {
+                restartAction.performed += OnRestartGame;
+            }
         }
 
         void TeardownInteractorEvents()
@@ -194,6 +228,8 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             {
                 m_RayInteractor.selectEntered.RemoveListener(OnRaySelectEntered);
                 m_RayInteractor.selectExited.RemoveListener(OnRaySelectExited);
+                m_RayInteractor.uiHoverEntered.RemoveListener(OnUIHoverEntered);
+                m_RayInteractor.uiHoverExited.RemoveListener(OnUIHoverExited);
             }
 
             var teleportModeActivateAction = GetInputAction(m_TeleportModeActivate);
@@ -231,6 +267,13 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
                 snapTurnAction.started -= OnStartLocomotion;
                 snapTurnAction.canceled -= OnStopLocomotion;
             }
+
+            // Remove restart game action
+            var restartAction = GetInputAction(m_RestartGame);
+            if (restartAction != null)
+            {
+                restartAction.performed -= OnRestartGame;
+            }
         }
 
         void OnStartTeleport(InputAction.CallbackContext context)
@@ -259,6 +302,29 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
 
             m_RayInteractorChanged?.Invoke(m_RayInteractor);
 
+        }
+
+        void OnRestartGame(InputAction.CallbackContext context)
+        {
+            if (!m_RestartEnabled || m_IsRestarting)
+                return;
+
+            StartCoroutine(RestartGameWithDelay());
+        }
+
+        IEnumerator RestartGameWithDelay()
+        {
+            m_IsRestarting = true;
+
+            // Optional: Add visual/audio feedback here that restart is happening
+            Debug.Log("Restarting game in " + m_RestartDelay + " seconds...");
+
+            // Wait for the delay
+            yield return new WaitForSeconds(m_RestartDelay);
+
+            // Reload the current scene
+            Scene currentScene = SceneManager.GetActiveScene();
+            SceneManager.LoadScene(currentScene.buildIndex);
         }
 
         void OnStartLocomotion(InputAction.CallbackContext context)
@@ -324,7 +390,10 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             // Allow the locomotion actions to be refreshed when this is re-enabled.
             // See comments in Start for why we wait until Start to enable/disable locomotion actions.
             if (m_StartCalled)
+            {
                 UpdateLocomotionActions();
+                UpdateRestartAction();
+            }
 
             SetupInteractorEvents();
 
@@ -349,6 +418,7 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             // Called in Start so it is done after the InputActionManager enables all input actions earlier in OnEnable.
             UpdateLocomotionActions();
             UpdateUIActions();
+            UpdateRestartAction();
 
             if (m_ManipulationInteractionGroup == null)
             {
@@ -434,6 +504,12 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             // Disable ability to turn when using continuous movement
             SetEnabled(m_Turn, !m_SmoothMotionEnabled && m_SmoothTurnEnabled);
             SetEnabled(m_SnapTurn, !m_SmoothMotionEnabled && !m_SmoothTurnEnabled);
+        }
+
+        void UpdateRestartAction()
+        {
+            // Enable or disable the restart action based on settings
+            SetEnabled(m_RestartGame, m_RestartEnabled);
         }
 
         void DisableLocomotionActions()
